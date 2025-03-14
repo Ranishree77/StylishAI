@@ -8,14 +8,16 @@ dresses = {"Dress", "Jumpsuit"}
 footwear = {"Sneakers", "Shoes", "Boots", "Sandals", "Ballerinas"}
 accessories = {"Bag", "Scarf", "Necklace", "Earrings", "Other accessories"}
 materials = ["cotton", "denim", "silk", "wool", "leather", "linen", "polyester", "nylon", "velvet", "suede", "rayon", "chiffon", "spandex", "canvas", "corduroy", "satin", "tweed", "fleece", "acrylic", "cashmere", "viscose", "microfiber", "modal", "terrycloth", "bamboo", "hemp", "merino", "alpaca", "tulle", "neoprene", "lycra", "jacquard", "gabardine", "tencel", "organza", "mesh", "georgette", "seersucker", "poplin", "taffeta", "lace"]
+dresses = {"Dress", "Jumpsuit"}  # Ensure this is defined
 
-#Outfit rules based on category #not using currently but need to figure out few cases here
+# Outfit rules based on category
 OUTFIT_RULES = {
     "top_bottom": ["top", "bottom"],
     "top_bottom_footwear": ["top", "bottom", "footwear"],
-    "dress_footwear_accessory": ["dress", "footwear", "accessory"],
+    "dress_footwear_accessory": ["dress", "footwear", "accessory"],  # Add this rule
 }
 
+# Compatibility prompts
 compatibility_prompts = [
     "A {top_material} {top_color} top paired with a {bottom_material} {bottom_color} bottom",
     "A stylish combination of a {top_material} {top_color} top and a {bottom_material} {bottom_color} bottom",
@@ -24,6 +26,11 @@ compatibility_prompts = [
     "A stylish combination with complementary colors",
     "A well-coordinated outfit with balanced colors",
     "Fashionable outfit with complementary colors",
+    # "A {dress_material} {dress_color} dress",
+    # "A stylish {dress_material} dress with {dress_color} color",
+    # "A fashionable {dress_material} dress",
+    "A textured outfit with diverse materials",
+    "A chic mix of smooth and rough textures",
     "An outfit that uses contrasting colors in a pleasing way",
     "A color-coordinated outfit that looks harmonious together",
     "A bold outfit with a mix of contrasting patterns",

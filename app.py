@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from PIL import Image
 from models import model, processor  # Import from models.py
-from inputs import clothing_types, occasions, seasons, materials, compatibility_prompts  # Import from inputs.py
+from inputs import clothing_types, dresses, occasions, seasons, materials, compatibility_prompts  # Import from inputs.py
 from utils import get_dominant_color, classify_image_clip  # Import from utils.py
 from outfit_analyzer import OutfitCompatibilityAnalyzer  # Import from outfit_analyzer.py
 
@@ -46,18 +46,24 @@ best_outfits = analyzer.find_best_matches(user_selected_occasion)
 
 # Display results
 if best_outfits:
-    for idx, (top, best_matches) in enumerate(best_outfits, 1):
-        print(f"\n--- Outfit {idx} ---")
-        print(f"Top Image Information:")
-        print(top)
-        Image.open(top['image_path']).resize((256, 256)).show
+    for idx, (item, matches) in enumerate(best_outfits, 1):
+        if matches is None:  # Dress
+            print(f"\n--- Dress {idx} ---")
+            print(f"Dress Information:")
+            print(item)
+            Image.open(item['image_path']).resize((256, 256)).show()
+        else:  # Top-bottom pair
+            print(f"\n--- Outfit {idx} ---")
+            print(f"Top Image Information:")
+            print(item)
+            Image.open(item['image_path']).resize((256, 256)).show()
 
-        print("\nBest Matched Bottoms:")
-        for bottom, score in best_matches:
-            print(f"  Bottom Information:")
-            print(bottom)
-            print(f"   Match Score: {score:.2f}")
-            Image.open(bottom['image_path']).resize((256, 256)).show()
+            print("\nBest Matched Bottoms:")
+            for bottom, score in matches:
+                print(f"  Bottom Information:")
+                print(bottom)
+                print(f"   Match Score: {score:.2f}")
+                Image.open(bottom['image_path']).resize((256, 256)).show()
 else:
     print("No results to display.")
 

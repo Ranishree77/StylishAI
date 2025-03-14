@@ -8,40 +8,56 @@ class OutfitCompatibilityAnalyzer:
         self.df = classified_df
         self.tops = self.df[self.df['Category'] == 'Top']
         self.bottoms = self.df[self.df['Category'] == 'Bottom']
+        self.dresses = self.df[self.df['Category'] == 'Dress']  # Add dresses
         self.clip_processor = clip_processor
         self.clip_model = clip_model
         self.compatibility_prompts = compatibility_prompts
 
     def find_best_matches(self, occasion):
+        # Filter tops, bottoms, and dresses based on occasion
         filtered_tops = self.tops[self.tops['Occasion'] == occasion]
         filtered_bottoms = self.bottoms[self.bottoms['Occasion'] == occasion]
+        filtered_dresses = self.dresses[self.dresses['Occasion'] == occasion]  # Filter dresses
 
-        if filtered_tops.empty or filtered_bottoms.empty:
-            print(f"No tops or bottoms found for the occasion: {occasion}")
+        # Check if there are any items for the selected occasion
+        if filtered_tops.empty and filtered_bottoms.empty and filtered_dresses.empty:
+            print(f"No tops, bottoms, or dresses found for the occasion: {occasion}")
             return []
 
-        if len(filtered_tops) < 3:
-            print(f"Not enough tops found for the occasion: {occasion}. Need at least 3, found {len(filtered_tops)}")
-            return []
+        # Initialize a list to store all recommendations
+        recommendations = []
 
-        random_top_indices = random.sample(range(len(filtered_tops)), 3)
-        selected_tops = [filtered_tops.iloc[i] for i in random_top_indices]
+        # Add dresses to recommendations
+        if not filtered_dresses.empty:
+            for _, dress in filtered_dresses.iterrows():
+                recommendations.append((dress, None))  # Dresses don't need pairing
 
-        best_outfits = []
-        for top in selected_tops:
-            scores = []
-            for _, bottom in filtered_bottoms.iterrows():
-                score = self._calculate_compatibility(top, bottom)
-                scores.append((bottom, score))
+        # Add top-bottom pairs to recommendations
+        if not filtered_tops.empty and not filtered_bottoms.empty:
+            if len(filtered_tops) < 3:
+                print(f"Not enough tops found for the occasion: {occasion}. Need at least 3, found {len(filtered_tops)}")
+            else:
+                random_top_indices = random.sample(range(len(filtered_tops)), 3)
+                selected_tops = [filtered_tops.iloc[i] for i in random_top_indices]
 
-            sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)[:3]
-            best_outfits.append((top, sorted_scores))
+                for top in selected_tops:
+                    scores = []
+                    for _, bottom in filtered_bottoms.iterrows():
+                        score = self._calculate_compatibility(top, bottom)
+                        scores.append((bottom, score))
 
-        def average_outfit_score(outfit):
-            return np.mean([score for _, score in outfit[1]])
+                    sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)[:3]
+                    recommendations.append((top, sorted_scores))
 
-        best_outfits.sort(key=average_outfit_score, reverse=True)
-        return best_outfits[:2]
+        # Sort all recommendations by score (for dresses, use a default score of 1.0)
+        def get_recommendation_score(recommendation):
+            if recommendation[1] is None:  # Dress
+                return 1.0  # Default score for dresses
+            else:  # Top-bottom pair
+                return np.mean([score for _, score in recommendation[1]])
+
+        recommendations.sort(key=get_recommendation_score, reverse=True)
+        return recommendations[:5]  # Return top 5 recommendations (dresses and top-bottom pairs)
 
     def _calculate_compatibility(self, top, bottom):
         image_score = self._get_visual_compatibility_score(top['image_path'], bottom['image_path'])
@@ -76,6 +92,8 @@ class OutfitCompatibilityAnalyzer:
                 bottom_material=bottom['Material'],
                 top_color=top['Dominant Color'],
                 bottom_color=bottom['Dominant Color']
+                # dress_material=dress['Material'],
+                # dress_color=dress['dress_color']
             )
             inputs = self.clip_processor(
                 text=[prompt, "unfashionable combination"],
@@ -86,5 +104,3 @@ class OutfitCompatibilityAnalyzer:
             outputs = self.clip_model(**inputs)
             scores.append(outputs.logits_per_image.softmax(dim=1)[0][0].item())
         return np.mean(scores)
-
-        

@@ -2,7 +2,7 @@
 from PIL import Image
 from collections import Counter
 import torch
-from inputs import tops, bottoms  # Import tops and bottoms from inputs.py
+from inputs import tops, bottoms, dresses  # Import tops and bottoms from inputs.py
 
 def get_dominant_color(image_path, resize_size=(150, 150)):
     """
@@ -51,7 +51,7 @@ def classify_image_clip(image_path, processor, model, clothing_types, occasions,
         material = materials[probs.argmax().item()]
 
         # Map clothing type to broader category
-        category = "Top" if clothing_type in tops else "Bottom" if clothing_type in bottoms else "Other"
+        category = "Top" if clothing_type in tops else "Bottom" if clothing_type in bottoms else "Dress" if clothing_type in dresses else "Other"  # Add dresses
         dominant_color = get_dominant_color(image_path)
 
         return clothing_type, category, occasion, season, material, dominant_color
