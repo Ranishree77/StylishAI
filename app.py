@@ -3,9 +3,8 @@ import os
 import pandas as pd
 from PIL import Image
 from models import model, processor  # Import from models.py
-from models import model_fc, processor_fc #Import from models.py
 from inputs import clothing_types, dresses, occasions, seasons, materials, compatibility_prompts  # Import from inputs.py
-from utils import get_dominant_color_kmeans, classify_image_clip  # Import from utils.py
+from utils import get_dominant_color, classify_image_clip  # Import from utils.py
 from outfit_analyzer import OutfitCompatibilityAnalyzer  # Import from outfit_analyzer.py
 
 # Load classified images and analyze
@@ -17,7 +16,7 @@ for image_name in os.listdir(image_folder):
     image_path = os.path.join(image_folder, image_name)
     if os.path.isfile(image_path):
         clothing_type, category, occasion, season, material, dominant_color = classify_image_clip(
-            image_path, processor_fc, model_fc, clothing_types, occasions, seasons, materials
+            image_path, processor, model, clothing_types, occasions, seasons, materials
         )
         if clothing_type:
             results.append({
@@ -40,7 +39,7 @@ print("Classification complete. Results saved to Classified.csv")
 analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts)
 
 # User-selected occasion
-user_selected_occasion = "Casual"
+user_selected_occasion = "Partywear"
 
 # Retrieve the top and best matches
 best_outfits = analyzer.find_best_matches(user_selected_occasion)
