@@ -1,69 +1,78 @@
-# app.py
+from flask import Flask, request, jsonify
 import os
 import pandas as pd
+import torch
 from PIL import Image
-from models import model, processor  # Import from models.py
-from inputs import clothing_types, dresses, occasions, seasons, materials, compatibility_prompts  # Import from inputs.py
-from utils import get_dominant_color, classify_image_clip  # Import from utils.py
-from outfit_analyzer import OutfitCompatibilityAnalyzer  # Import from outfit_analyzer.py
+from models import model, processor
+from inputs import clothing_types, occasions, seasons, materials, compatibility_prompts
+from outfit_analyzer import OutfitCompatibilityAnalyzer
+from utils import classify_image_clip
 
-# Load classified images and analyze
+app = Flask(__name__)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 image_folder = os.path.join(os.getcwd(), "Images")
 csv_file = os.path.join(os.getcwd(), "files")
-results = []
 
-for image_name in os.listdir(image_folder):
-    image_path = os.path.join(image_folder, image_name)
-    if os.path.isfile(image_path):
+def classify_and_analyze(images):
+    results = []
+    for image_data in images:
+        image_path = os.path.join(image_folder, image_data['filename'])
+        image = Image.open(image_path)
+        image.save(image_path)
+
         clothing_type, category, occasion, season, material, dominant_color = classify_image_clip(
             image_path, processor, model, clothing_types, occasions, seasons, materials
         )
-        if clothing_type:
-            results.append({
-                "image_path": image_path,
-                "image_name": image_name,
-                "Clothing_Type": clothing_type,
-                "Category": category,
-                "Occasion": occasion,
-                "Season": season,
-                "Material": material,
-                "Dominant Color": dominant_color
-            })
 
-# Convert results to DataFrame
-df = pd.DataFrame(results)
-df.to_csv(csv_file + "/Classified.csv", index=False)
-print("Classification complete. Results saved to Classified.csv")
+        results.append({
+            "image_name": image_data['filename'],
+            "Clothing_Type": clothing_type,
+            "Category": category,
+            "Occasion": occasion,
+            "Season": season,
+            "Material": material,
+            "Dominant Color": dominant_color
+        })
+    
+    df = pd.read_csv(os.path.join(csv_file, "Classified.csv"))
+    image_features = torch.load("image_features.pt") if os.path.exists("image_features.pt") else {}
+    analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts, image_features, device)
+    best_outfits = analyzer.find_best_matches(results[0]['Occasion'] if results else 'Partywear')
+    
+    outfit_combinations = {}
+    if best_outfits:
+        for item, matches in best_outfits:
+            if matches is None:
+                # Standalone dress (no bottoms needed)
+                outfit_combinations[item] = []
+            else:
+                # Tops with compatible bottoms
+                outfit_combinations[item] = [bottom for bottom, score in matches]
+    else:
+        return jsonify({"error": "No suitable outfits found"}), 404
+    
+    return jsonify({
+        "classification": results,
+        "outfit_combinations": outfit_combinations
+    })
 
-# Initialize OutfitCompatibilityAnalyzer
-analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts)
+@app.route('/process_images', methods=['POST'])
+def process_images():
+    try:
+        image_urls = request.get_json()
+        if not isinstance(image_urls, list):
+            return jsonify({"error": "Input must be a list of image URLs"}), 400
+        
+        if not image_urls:
+            return jsonify({"error": "No image URLs provided"}), 400
+        
+        result = classify_and_analyze(image_urls)
+        if "error" in result:
+            return jsonify({"error": result["error"]}), result.get("status", 400)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
-# User-selected occasion
-user_selected_occasion = "Partywear"
-
-# Retrieve the top and best matches
-best_outfits = analyzer.find_best_matches(user_selected_occasion)
-
-# Display results
-if best_outfits:
-    for idx, (item, matches) in enumerate(best_outfits, 1):
-        if matches is None:  # Dress
-            print(f"\n--- Dress {idx} ---")
-            print(f"Dress Information:")
-            print(item)
-            Image.open(item['image_path']).resize((256, 256)).show()
-        else:  # Top-bottom pair
-            print(f"\n--- Outfit {idx} ---")
-            print(f"Top Image Information:")
-            print(item)
-            Image.open(item['image_path']).resize((256, 256)).show()
-
-            print("\nBest Matched Bottoms:")
-            for bottom, score in matches:
-                print(f"  Bottom Information:")
-                print(bottom)
-                print(f"   Match Score: {score:.2f}")
-                Image.open(bottom['image_path']).resize((256, 256)).show()
-else:
-    print("No results to display.")
-
+if __name__ == '__main__':
+    app.run(debug=True)
