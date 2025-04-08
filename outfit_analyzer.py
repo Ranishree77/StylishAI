@@ -9,6 +9,7 @@ class OutfitCompatibilityAnalyzer:
         self.tops = self.df[self.df['Category'] == 'Top']
         self.bottoms = self.df[self.df['Category'] == 'Bottom']
         self.dresses = self.df[self.df['Category'] == 'Dress']  # Add dresses
+        self.footwears = self.df[self.df['Category'] == 'Footwear']  # Add footwear
         self.clip_processor = clip_processor
         self.clip_model = clip_model
         self.compatibility_prompts = compatibility_prompts
@@ -18,6 +19,7 @@ class OutfitCompatibilityAnalyzer:
         filtered_tops = self.tops[self.tops['Occasion'] == occasion]
         filtered_bottoms = self.bottoms[self.bottoms['Occasion'] == occasion]
         filtered_dresses = self.dresses[self.dresses['Occasion'] == occasion]  # Filter dresses
+        filtered_footwear = self.footwears[self.footwears['Category'] == 'Footwear'] # Filter footwear
 
         # Check if there are any items for the selected occasion
         if filtered_tops.empty and filtered_bottoms.empty and filtered_dresses.empty:
@@ -27,8 +29,20 @@ class OutfitCompatibilityAnalyzer:
         # Initialize a list to store all recommendations
         recommendations = []
 
+        #1 Add **Dresses + Footwear** to recommendations
+        if not filtered_dresses.empty and not filtered_footwear.empty:
+            for _, dress in filtered_dresses.iterrows():
+                scores = []
+                for _, shoe in filtered_footwear.iterrows():
+                    # Pass 'outfit_type="dress_footwear"' to indicate it's a dress + footwear combination
+                    score = self._calculate_compatibility(dress, shoe, outfit_type="dress_footwear")
+                    scores.append((shoe, score))
+
+                sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)[:2]
+                recommendations.append((dress, sorted_scores))
+
         # Add dresses to recommendations
-        if not filtered_dresses.empty:
+        elif not filtered_dresses.empty:
             for _, dress in filtered_dresses.iterrows():
                 recommendations.append((dress, None))  # Dresses don't need pairing
 
@@ -53,16 +67,24 @@ class OutfitCompatibilityAnalyzer:
         def get_recommendation_score(recommendation):
             if recommendation[1] is None:  # Dress
                 return 1.0  # Default score for dresses
-            else:  # Top-bottom pair
-                return np.mean([score for _, score in recommendation[1]])
+            elif isinstance(recommendation[1], list):  # If paired (Dress+Footwear or Top+Bottom)
+                return np.mean([score for _, score in recommendation[1]])  # Average score
+            return 0  # Fallback (should not happen)
 
         recommendations.sort(key=get_recommendation_score, reverse=True)
         return recommendations[:5]  # Return top 5 recommendations (dresses and top-bottom pairs)
 
-    def _calculate_compatibility(self, top, bottom):
-        image_score = self._get_visual_compatibility_score(top['image_path'], bottom['image_path'])
-        text_score = self._get_text_compatibility_score(top, bottom)
-        return 0.6 * image_score + 0.4 * text_score
+    def _calculate_compatibility(self, item1, item2, outfit_type="top_bottom"):
+        image_score = self._get_visual_compatibility_score(item1['image_path'], item2['image_path'])
+        text_score = self._get_text_compatibility_score(item1, item2)
+
+        if outfit_type == "dress_footwear":
+            # Adjust weightage for Dress + Footwear
+            return 0.7 * image_score + 0.3 * text_score
+        else:
+            # Default: Top + Bottom
+            return 0.6 * image_score + 0.4 * text_score
+        #Add logics for bottom + footwear , top+bottom+footwear later
 
     def _get_visual_compatibility_score(self, top_path, bottom_path):
         combined_image = self._create_combined_image(top_path, bottom_path)
@@ -84,20 +106,34 @@ class OutfitCompatibilityAnalyzer:
         combined.paste(bottom_img, (256, 0))
         return combined
 
-    def _get_text_compatibility_score(self, top, bottom):
+    def _get_text_compatibility_score(self, item1, item2, outfit_type="top_bottom"):
         scores = []
-        for prompt_template in self.compatibility_prompts:
-            prompt = prompt_template.format(
-                top_material=top['Material'],
-                bottom_material=bottom['Material'],
-                top_color=top['Dominant Color'],
-                bottom_color=bottom['Dominant Color']
-                # dress_material=dress['Material'],
-                # dress_color=dress['dress_color']
-            )
+
+        # Retrieve the relevant prompts for the given outfit_type
+        # Make sure the outfit_type is always passed exactly as it appears in the compatibility_prompts keys
+        relevant_prompts = self.compatibility_prompts.get(outfit_type, [])
+
+        # Loop over filtered prompts
+        for prompt_template in relevant_prompts:
+            if outfit_type == "dress_footwear":
+                prompt = prompt_template.format(
+                    dress_material=item1['Material'],
+                    dress_color=item1['Dominant Color'],
+                    footwear_material=item2['Material'],
+                    footwear_color=item2['Dominant Color']
+                )
+
+            else: # Default: Top + Bottom
+                prompt = prompt_template.format(
+                    top_material=item1['Material'],
+                    bottom_material=item2['Material'],
+                    top_color=item1['Dominant Color'],
+                    bottom_color=item2['Dominant Color']
+                )
+
             inputs = self.clip_processor(
                 text=[prompt, "unfashionable combination"],
-                images=self._create_combined_image(top['image_path'], bottom['image_path']),
+                images=self._create_combined_image(item1['image_path'], item2['image_path']),
                 return_tensors="pt",
                 padding=True
             )
