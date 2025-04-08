@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from models import model, processor
+from models import model_fc, processor_fc
 from inputs import clothing_types, occasions, seasons, materials, compatibility_prompts
 from outfit_analyzer import OutfitCompatibilityAnalyzer
 from utils import classify_image_clip
@@ -22,7 +23,7 @@ def classify_and_analyze(images):
         image.save(image_path)
 
         clothing_type, category, occasion, season, material, dominant_color = classify_image_clip(
-            image_path, processor, model, clothing_types, occasions, seasons, materials
+            image_path, processor_fc, model_fc, clothing_types, occasions, seasons, materials
         )
 
         results.append({
@@ -35,9 +36,12 @@ def classify_and_analyze(images):
             "Dominant Color": dominant_color
         })
     
+    # Load previously classified clothing items from the CSV and image features
     df = pd.read_csv(os.path.join(csv_file, "Classified.csv"))
     image_features = torch.load("image_features.pt") if os.path.exists("image_features.pt") else {}
-    analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts, image_features, device)
+    analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts, image_features, device) # type: ignore
+
+    # Find the best matches for the given occasion (e.g., 'Partywear' by default)
     best_outfits = analyzer.find_best_matches(results[0]['Occasion'] if results else 'Partywear')
     
     outfit_combinations = {}
@@ -47,8 +51,13 @@ def classify_and_analyze(images):
                 # Standalone dress (no bottoms needed)
                 outfit_combinations[item] = []
             else:
-                # Tops with compatible bottoms
-                outfit_combinations[item] = [bottom for bottom, score in matches]
+                # Handle each category: Dress or Top + Bottom
+                if item['Category'] == 'Dress':
+                    # If it's a dress, we'll look for footwear matches
+                    outfit_combinations[item] = [footwear_item for footwear_item, score in matches]
+                else:
+                    # If it's a Top, we'll look for Bottoms matches
+                    outfit_combinations[item] = [bottom_item for bottom_item, score in matches]
     else:
         return jsonify({"error": "No suitable outfits found"}), 404
     
@@ -68,8 +77,8 @@ def process_images():
             return jsonify({"error": "No image URLs provided"}), 400
         
         result = classify_and_analyze(image_urls)
-        if "error" in result:
-            return jsonify({"error": result["error"]}), result.get("status", 400)
+        if "error" in result:# type: ignore
+            return jsonify({"error": result["error"]}), result.get("status", 400) # type: ignore
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
