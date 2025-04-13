@@ -34,3 +34,12 @@
 2025-04-13 14:21:00,621 - INFO - 127.0.0.1 - - [13/Apr/2025 14:21:00] "POST /process_images HTTP/1.1" 200 -
 2025-04-13 14:22:36,968 - INFO -  * Detected change in 'C:\\Users\\ranis\\OneDrive\\Desktop\\Rani\\Projects\\StylishAI\\app.py', reloading
 2025-04-13 14:22:36,969 - INFO -  * Detected change in 'C:\\Users\\ranis\\OneDrive\\Desktop\\Rani\\Projects\\StylishAI\\app.py', reloading
+2025-04-13 14:22:38,768 - INFO -  * Restarting with watchdog (windowsapi)
+2025-04-13 14:22:49,222 - WARNING -  * Debugger is active!
+2025-04-13 14:22:49,233 - INFO -  * Debugger PIN: 562-303-376
+2025-04-13 14:22:49,418 - INFO - Processing 11 images from URLs
+2025-04-13 14:25:29,014 - INFO - 127.0.0.1 - - [13/Apr/2025 14:25:29] "POST /process_images HTTP/1.1" 200 -
+2025-04-13 14:27:08,173 - INFO -  * Detected change in 'C:\\Users\\ranis\\OneDrive\\Desktop\\Rani\\Projects\\StylishAI\\app_old.py', reloading
+2025-04-13 14:27:10,128 - INFO -  * Restarting with watchdog (windowsapi)
+2025-04-13 14:27:23,615 - WARNING -  * Debugger is active!
+2025-04-13 14:27:23,620 - INFO -  * Debugger PIN: 562-303-376
