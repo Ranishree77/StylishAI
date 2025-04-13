@@ -4,19 +4,15 @@ from PIL import Image
 import requests
 from io import BytesIO
 import logging
-import os
-import torch
 from models import model, processor
-from models import model_fc, processor_fc
 from inputs import clothing_types, occasions, seasons, materials, compatibility_prompts
 from outfit_analyzer import OutfitCompatibilityAnalyzer  # Assuming this class is defined in outfit_analyzer.py
 from utils import classify_image_clip
 import traceback
 from typing import List, Dict, Union, Optional
 import re
-import tempfile
 
-app = Flask(__name__)
+app = Flask(_name_)
 
 # Configure logging
 logging.basicConfig(
@@ -27,11 +23,7 @@ logging.basicConfig(
         logging.FileHandler('app.log')
     ]
 )
-logger = logging.getLogger(__name__)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-image_folder = os.path.join(os.getcwd(), "Images")
-csv_file = os.path.join(os.getcwd(), "files")
+logger = logging.getLogger(_name_)
 
 def normalize_firebase_url(url: str) -> str:
     """Normalize Firebase Storage URLs to consistent format."""
@@ -98,8 +90,8 @@ def download_image(url: str) -> Optional[Image.Image]:
         logger.error(f"Failed to download image {url}: {str(e)}", exc_info=True)
         return None
 
-def classify_and_analyze_url(image_urls: List[str]) -> Dict[str, Union[List, Dict, str]]:
-    """Classify images from URLs and analyze outfit compatibility."""
+def classify_and_analyze(image_urls: List[str]) -> Dict[str, Union[List, Dict, str]]:
+    """Classify images and analyze outfit compatibility."""
     results = []
     analyzed_items = []
     errors = []
@@ -120,17 +112,10 @@ def classify_and_analyze_url(image_urls: List[str]) -> Dict[str, Union[List, Dic
                 image.save(img_byte_arr, format="JPEG", quality=85)
                 img_byte_arr.seek(0)
 
-                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp_file:
-                    tmp_file.write(img_byte_arr.read())
-                    temp_file_path = tmp_file.name
-
-                try:
-                    classification = classify_image_clip(
-                        temp_file_path, processor, model,
-                        clothing_types, occasions, seasons, materials
-                    )
-                finally:
-                    os.remove(temp_file_path) # Clean up the temporary file
+                classification = classify_image_clip(
+                    img_byte_arr, processor, model,
+                    clothing_types, occasions, seasons, materials
+                )
 
                 if not classification or len(classification) != 6:
                     raise ValueError("Invalid classification results")
@@ -168,9 +153,9 @@ def classify_and_analyze_url(image_urls: List[str]) -> Dict[str, Union[List, Dic
         current_df = pd.DataFrame(analyzed_items)
 
         # Ensure we have at least one valid category
-        valid_categories = ['Top', 'Bottom', 'Dress', 'Footwear'] # Include Footwear
+        valid_categories = ['Top', 'Bottom', 'Dress']
         if not any(cat in current_df['Category'].values for cat in valid_categories):
-            logger.warning("No tops, bottoms, dresses, or footwear found in analyzed items")
+            logger.warning("No tops, bottoms, or dresses found in analyzed items")
             return {
                 "classification": results,
                 "outfit_combinations": {},
@@ -236,118 +221,60 @@ def classify_and_analyze_url(image_urls: List[str]) -> Dict[str, Union[List, Dic
             "success": False
         }
 
-def classify_and_analyze_local(images: List[Dict]) -> Dict:
-    """Classify local images and analyze outfit compatibility."""
-    results = []
-    for image_data in images:
-        image_path = os.path.join(image_folder, image_data['filename'])
-        try:
-            image = Image.open(image_path)
-            image.save(image_path)  # Ensure the image is properly saved/read
-        except FileNotFoundError:
-            logger.error(f"Image not found: {image_path}")
-            continue
-        except Exception as e:
-            logger.error(f"Error opening image {image_path}: {e}")
-            continue
-
-        try:
-            clothing_type, category, occasion, season, material, dominant_color = classify_image_clip(
-                image_path, processor_fc, model_fc, clothing_types, occasions, seasons, materials
-            )
-
-            results.append({
-                "image_name": image_data['filename'],
-                "Clothing_Type": clothing_type,
-                "Category": category,
-                "Occasion": occasion,
-                "Season": season,
-                "Material": material,
-                "Dominant Color": dominant_color
-            })
-        except Exception as e:
-            logger.error(f"Error classifying {image_path}: {e}")
-            continue
-
-    if not results:
-        return jsonify({"error": "No images classified successfully"}), 400
-
-    try:
-        df = pd.read_csv(os.path.join(csv_file, "Classified.csv"))
-        image_features = torch.load("image_features.pt") if os.path.exists("image_features.pt") else {}
-        analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts, image_features, device) # type: ignore
-
-        occasion_to_analyze = results[0]['Occasion'] if results else 'Partywear'
-        best_outfits = analyzer.find_best_matches(occasion_to_analyze)
-
-        outfit_combinations = {}
-        if best_outfits:
-            for item, matches in best_outfits:
-                if matches is None:
-                    outfit_combinations[item] = []
-                else:
-                    item_category = item.get('Category') if isinstance(item, dict) else getattr(item, 'Category', None)
-                    if item_category == 'Dress':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Footwear']
-                    elif item_category == 'Top':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Bottom']
-                    elif item_category == 'Bottom':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Top']
-                    elif item_category == 'Footwear':
-                        # Consider pairing footwear with dresses for local uploads as well
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Dress']
-                    else:
-                        outfit_combinations[item] = [match[0] for match in matches]
-        else:
-            logger.info(f"No suitable outfits found for occasion: {occasion_to_analyze}")
-            return jsonify({"classification": results, "outfit_combinations": {}}), 200
-
-        return jsonify({
-            "classification": results,
-            "outfit_combinations": outfit_combinations
-        })
-
-    except FileNotFoundError:
-        logger.error("Classified.csv not found.")
-        return jsonify({"error": "Could not load classified data."}), 500
-    except Exception as e:
-        logger.error(f"Error during outfit analysis: {e}", exc_info=True)
-        return jsonify({"error": f"Error during outfit analysis: {str(e)}"}), 500
-
 @app.route('/process_images', methods=['POST'])
 def process_images():
+    """Endpoint to process images and suggest outfit combinations."""
     try:
-        if request.is_json:
-            data = request.get_json()  # Get the dictionary
-            if isinstance(data, dict) and "images" in data and isinstance(data["images"], list) and all(isinstance(url, str) for url in data["images"]):
-                image_urls = data["images"]  # Extract the list of URLs
-                logger.info(f"Processing {len(image_urls)} images from URLs")
-                result = classify_and_analyze_url(image_urls)
-                return jsonify(result)
-            else:
-                return jsonify({"error": "Input must be a JSON with an 'images' key containing a list of image URLs"}), 400
-        elif request.files:
-            images = []
-            for filename, file in request.files.items():
-                if filename.startswith('image'):
-                    filepath = os.path.join(image_folder, file.filename)
-                    file.save(filepath)
-                    images.append({'filename': file.filename})
-            if images:
-                logger.info(f"Processing {len(images)} local images")
-                result = classify_and_analyze_local(images)
-                return result
-            else:
-                return jsonify({"error": "No image files uploaded"}), 400
-        else:
-            return jsonify({"error": "Invalid request format. Expecting JSON with image URLs or image files."}), 400
+        logger.info("Received request to process images")
+
+        data = request.get_json()
+        if not data or 'images' not in data:
+            logger.warning("Missing images data in request")
+            return jsonify({
+                "error": "Missing images data",
+                "success": False
+            }), 400
+
+        image_urls = data['images']
+        if not isinstance(image_urls, list):
+            logger.warning("Images data is not a list")
+            return jsonify({
+                "error": "Images should be a list of URLs",
+                "success": False
+            }), 400
+
+        if not image_urls:
+            logger.warning("Empty images list provided")
+            return jsonify({
+                "error": "No images provided",
+                "success": False
+            }), 400
+
+        # Validate URLs before processing
+        invalid_urls = [url for url in image_urls if not validate_image_url(url)]
+        if invalid_urls:
+            logger.warning(f"Invalid URLs detected: {invalid_urls}")
+            return jsonify({
+                "error": f"Invalid image URLs: {invalid_urls[:3]}...",
+                "success": False
+            }), 400
+
+        logger.info(f"Processing {len(image_urls)} images")
+        result = classify_and_analyze(image_urls)
+
+        if not result.get("success", False):
+            status_code = 400 if result.get("error") else 200
+            return jsonify(result), status_code
+
+        return jsonify(result)
+
     except Exception as e:
         logger.error(f"Server error: {str(e)}\n{traceback.format_exc()}")
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e),
+            "success": False
+        }), 500
 
-if __name__ == '__main__':
-    os.makedirs(image_folder, exist_ok=True)
-    os.makedirs(csv_file, exist_ok=True)
-    if not os.path.exists(os.path.join(csv_file, "Classified.csv")):
-        pd.DataFrame(columns=['image_name', 'Clothing_Type', 'Category', 'Occasion', 'Season', 'Material', 'Dominant Color']).to_csv(os.path.join(csv_file, "Classified.csv"), index=False)
+if _name_ == '_main_':
     app.run(host='0.0.0.0', port=5000, debug=True)
