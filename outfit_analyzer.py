@@ -48,8 +48,59 @@ class OutfitCompatibilityAnalyzer:
         elif not filtered_dresses.empty:
             for _, dress in filtered_dresses.iterrows():
                 recommendations.append((dress.to_dict(), None))
+        
+        # 3. Top + Bottom + Footwear
+        if not filtered_tops.empty and not filtered_bottoms.empty and not filtered_footwear.empty:
+            try:
+                # Get sample tops - up to 3 if available, but work with whatever we have (even just 1)
+                top_count = len(filtered_tops)
+                if top_count > 0:
+                    # If we have more than 3 tops, randomly sample 3
+                    if top_count > 3:
+                        random_top_indices = random.sample(range(len(filtered_tops)), min(3, len(filtered_tops)))
+                        selected_tops = [filtered_tops.iloc[i].to_dict() for i in random_top_indices]
+                    # Otherwise use all available tops
+                    else:
+                        selected_tops = [filtered_tops.iloc[i].to_dict() for i in range(top_count)]
 
-        # 3. Top + Bottom
+                    for top in selected_tops:
+                        # First find compatible bottoms
+                        bottom_scores = []
+                        for _, bottom in filtered_bottoms.iterrows():
+                            bottom_dict = bottom.to_dict()
+                            score = self._calculate_compatibility(top, bottom_dict, outfit_type="top_bottom")
+                            bottom_scores.append((bottom_dict, score))
+
+                        # Get the top 2 most compatible bottoms
+                        top_bottoms = sorted(bottom_scores, key=lambda x: x[1], reverse=True)[:2]
+
+                        # For each top-bottom pair, find compatible footwear
+                        for bottom_item, bottom_score in top_bottoms:
+                            footwear_scores = []
+                            for _, shoe in filtered_footwear.iterrows():
+                                shoe_dict = shoe.to_dict()
+                                # Calculate compatibility score for the three-piece outfit
+                                three_piece_score = self._calculate_three_piece_compatibility(
+                                top, bottom_item, shoe_dict
+                                )
+                                footwear_scores.append((shoe_dict, three_piece_score))
+                        
+                            # Get the top 2 most compatible footwear options for best matched "top+bottom" pair
+                            top_footwear = sorted(footwear_scores, key=lambda x: x[1], reverse=True)[:2]
+
+                            # Create the three-piece recommendation
+                            # Store as a tuple: (top, [(bottom, footwear1, score1), (bottom, footwear2, score2), ...])
+                            three_piece_recs = []
+                            for shoe_item, three_piece_score in top_footwear:
+                                three_piece_recs.append((bottom_item, shoe_item, three_piece_score))
+                        
+                            if three_piece_recs:
+                                recommendations.append((top, three_piece_recs))
+
+            except Exception as e:
+                logger.error(f"Error generating top-bottom-footwear recommendations for occasion {occasion}: {e}", exc_info=True)
+
+        # 3. Top + Bottom (Also generate Top + Bottom outfits (even if footwear exists))
         if not filtered_tops.empty and not filtered_bottoms.empty:
             if len(filtered_tops) < 3:
                 logger.info(f"Not enough tops found for the occasion: {occasion}. Need at least 3, found {len(filtered_tops)}")
@@ -73,7 +124,10 @@ class OutfitCompatibilityAnalyzer:
             if matches is None:  # Standalone dress
                 return 1.0
             elif isinstance(matches, list) and matches:
-                return np.mean([score for _, score in matches])
+                if all(len(match) == 3 for match in matches):  # Three-piece outfit (top+bottom+footwear)
+                    return np.mean([score for _, _, score in matches])
+                else:# Two-piece outfit (dress+footwear or top+bottom)
+                    return np.mean([score for _, score in matches])
             return 0.0
 
         recommendations.sort(key=get_recommendation_score, reverse=True)
@@ -87,15 +141,63 @@ class OutfitCompatibilityAnalyzer:
             return 0.7 * image_score + 0.3 * text_score
         else:
             return 0.6 * image_score + 0.4 * text_score
-        # Add logics for bottom + footwear , top+bottom+footwear later
+    
+    #new function for top+bottom+footwear compatibility check
+    #determine how well three pieces of clothing (top, bottom, and footwear) work together as a complete outfit.
+    def _calculate_three_piece_compatibility(self, top, bottom, footwear):
+        """Calculate compatibility for a three-piece outfit (top + bottom + footwear)"""
+        try:
+            # Calculate pairwise compatibility scores
+            top_bottom_score = self._calculate_compatibility(top, bottom, "top_bottom")
+            bottom_footwear_score = self._calculate_compatibility(bottom, footwear, "bottom_footwear")
+            top_footwear_score = self._calculate_compatibility(top, footwear, "top_footwear")
 
-    def _get_visual_compatibility_score(self, path1, path2):
+            # Calculate visual compatibility score for all three pieces together
+            visual_score = self._get_visual_compatibility_score(
+                top['image_path'],
+                bottom['image_path'],
+                footwear['image_path']
+            )
+            
+            # Get text compatibility score for the three-piece outfit
+            text_score = self._get_text_compatibility_score(
+                top,
+                bottom,
+                "top_bottom_footwear",
+                item3=footwear
+            )
+
+            # Calculate final score - weighted average of all compatibility metrics
+            final_score = (
+                0.2 * top_bottom_score + 
+                0.1 * bottom_footwear_score + 
+                0.1 * top_footwear_score +
+                0.3 * visual_score +
+                0.3 * text_score
+                )
+            return final_score
+        
+        except Exception as e:
+            logger.error(f"Error calculating three-piece compatibility: {e}", exc_info=True)
+            return 0.0
+
+    #accomodated to include three piece outfit #review once 
+    def _get_visual_compatibility_score(self, path1, path2, path3=None):
+        """Get visual compatibility score for 2-3 clothing items"""
+        #review this function how image will be loaded for each outfit type
         try:
             img1 = self._load_image_from_url(path1)
             img2 = self._load_image_from_url(path2)
             if img1 is None or img2 is None:
                 return 0.0
-            combined_image = self._create_combined_image(img1, img2)
+            # Load the third image if provided
+            img3 = None
+            if path3:
+                img3 = self._load_image_from_url(path3)
+                if img3 is None:
+                    return 0.0
+
+            combined_image = self._create_combined_image(img1, img2, img3)
             image_inputs = self.clip_processor(images=combined_image, return_tensors="pt", padding=True)
             image_features = self.clip_model.get_image_features(**image_inputs)
             text_inputs = self.clip_processor(text=["a fashionable outfit", "an unfashionable outfit"], return_tensors="pt", padding=True)
@@ -106,7 +208,7 @@ class OutfitCompatibilityAnalyzer:
             similarity = image_features @ text_features.T
             return similarity[0][0].item()
         except Exception as e:
-            logger.error(f"Error calculating visual compatibility for {path1} and {path2}: {e}", exc_info=True)
+            logger.error(f"Error calculating visual compatibility for: {e}", exc_info=True)
             return 0.0
 
     def _load_image_from_url(self, image_url):
@@ -117,21 +219,40 @@ class OutfitCompatibilityAnalyzer:
             logger.error(f"Error loading image from {image_url}: {e}", exc_info=True)
             return None
 
-    def _create_combined_image(self, img1, img2):
-        combined = Image.new('RGB', (512, 256))
-        combined.paste(img1, (0, 0))
-        combined.paste(img2, (256, 0))
+    #updated to accomodate 3 piece outfit type
+    def _create_combined_image(self, img1, img2, img3=None):
+        """Create a combined image from 2-3 component images"""
+        if img3 is None:
+            # Original case: two images side by side
+            combined = Image.new('RGB', (512, 256))
+            combined.paste(img1, (0, 0))
+            combined.paste(img2, (256, 0))
+        else:
+            # New case: three images side by side
+            combined = Image.new('RGB', (768, 256))
+            combined.paste(img1, (0, 0))
+            combined.paste(img2, (256, 0))
+            combined.paste(img3, (512, 0))
         return combined
 
-    def _get_text_compatibility_score(self, item1, item2, outfit_type="top_bottom"):
+    #defaults to top_bottom outfit type
+    def _get_text_compatibility_score(self, item1, item2, outfit_type="top_bottom", item3=None):
         scores = []
         try:
+            # Load images
             img1 = self._load_image_from_url(item1['image_path'])
             img2 = self._load_image_from_url(item2['image_path'])
             if img1 is None or img2 is None:
                 return 0.0
+            
+            img3 = None
+            if item3:
+                img3 = self._load_image_from_url(item3['image_path'])
+                if img3 is None:
+                    return 0.0
 
-            combined_image = self._create_combined_image(img1, img2)
+            # Create combined image based on number of items
+            combined_image = self._create_combined_image(img1, img2, img3)
             relevant_prompts = self.compatibility_prompts.get(outfit_type, [])
 
             for prompt_template in relevant_prompts:
@@ -141,6 +262,29 @@ class OutfitCompatibilityAnalyzer:
                         dress_color=item1.get('Dominant_Color', 'unknown'),
                         footwear_material=item2.get('Material', 'unknown'),
                         footwear_color=item2.get('Dominant_Color', 'unknown')
+                    )
+                elif outfit_type == "bottom_footwear": #new
+                    prompt = prompt_template.format(
+                        bottom_material=item1.get('Material', 'unknown'),
+                        bottom_color=item1.get('Dominant_Color', 'unknown'),
+                        footwear_material=item2.get('Material', 'unknown'),
+                        footwear_color=item2.get('Dominant_Color', 'unknown')
+                    )
+                elif outfit_type == "top_footwear": #new
+                    prompt = prompt_template.format(
+                        top_material=item1.get('Material', 'unknown'),
+                        top_color=item1.get('Dominant_Color', 'unknown'),
+                        footwear_material=item2.get('Material', 'unknown'),
+                        footwear_color=item2.get('Dominant_Color', 'unknown')
+                    )
+                elif outfit_type == "top_bottom_footwear" and item3: #new (review logic)
+                    prompt = prompt_template.format(
+                        top_material=item1.get('Material', 'unknown'),
+                        top_color=item1.get('Dominant_Color', 'unknown'),
+                        bottom_material=item2.get('Material', 'unknown'),
+                        bottom_color=item2.get('Dominant_Color', 'unknown'),
+                        footwear_material=item3.get('Material', 'unknown'),
+                        footwear_color=item3.get('Dominant_Color', 'unknown')
                     )
                 else:  # Default: Top + Bottom
                     prompt = prompt_template.format(
