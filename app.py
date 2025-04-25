@@ -15,6 +15,7 @@ import traceback
 from typing import List, Dict, Union, Optional
 import re
 import tempfile
+from flask import has_app_context #only for testing
 
 app = Flask(__name__)
 
@@ -210,12 +211,33 @@ def classify_and_analyze_url(image_urls: List[str]) -> Dict[str, Union[List, Dic
                 if not item_url:
                     continue
 
-                outfit_combinations[item_url] = [
-                    match[0].get('image_path', '') if isinstance(match[0], dict)
-                    else getattr(match[0], 'image_path', '')
-                    for match in (matches or [])
-                    if match and match[0]
-                ]
+                if matches is None:
+                    # Case 1: Standalone Dress
+                    outfit_combinations[item_url] = []
+                elif isinstance(matches[0], tuple) and len(matches[0]) == 2:
+                    second_item, score = matches[0]
+                    second_url = second_item.get('image_path', '') if isinstance(second_item, dict) else getattr(second_item, 'image_path', '')
+
+                    if item.get('Category', '') == 'Dress':
+                        # Case 2: Dress + Footwear
+                        outfit_combinations[item_url] = [second_url]
+                    else:
+                        # Case 3: Top + Bottom
+                        outfit_combinations[item_url] = [
+                        match[0].get('image_path', '') if isinstance(match[0], dict)
+                        else getattr(match[0], 'image_path', '')
+                        for match in (matches or []) if match and match[0]
+                        ]
+                elif isinstance(matches[0], tuple) and len(matches[0]) == 3:
+                    # Case 4: Top + Bottom + Footwear
+                    outfit_combinations[item_url] = [
+                        [
+                            #item_url,
+                            match[0].get('image_path', ''),  # bottom
+                            match[1].get('image_path', '')   # footwear
+                        ] for match in matches
+                    ]
+
             except Exception as e:
                 logger.warning(f"Failed to process outfit combination: {str(e)}")
                 continue
@@ -268,7 +290,7 @@ def classify_and_analyze_local(images: List[Dict]) -> Dict:
         except Exception as e:
             logger.error(f"Error classifying {image_path}: {e}")
             continue
-
+    
     if not results:
         return jsonify({"error": "No images classified successfully"}), 400
 
@@ -277,27 +299,47 @@ def classify_and_analyze_local(images: List[Dict]) -> Dict:
         image_features = torch.load("image_features.pt") if os.path.exists("image_features.pt") else {}
         analyzer = OutfitCompatibilityAnalyzer(df, processor, model, compatibility_prompts, image_features, device) # type: ignore
 
+        #just for testing #remove later
+        #occasion_to_analyze = 'Casual'
         occasion_to_analyze = results[0]['Occasion'] if results else 'Partywear'
         best_outfits = analyzer.find_best_matches(occasion_to_analyze)
 
         outfit_combinations = {}
         if best_outfits:
             for item, matches in best_outfits:
-                if matches is None:
-                    outfit_combinations[item] = []
-                else:
-                    item_category = item.get('Category') if isinstance(item, dict) else getattr(item, 'Category', None)
-                    if item_category == 'Dress':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Footwear']
-                    elif item_category == 'Top':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Bottom']
-                    elif item_category == 'Bottom':
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Top']
-                    elif item_category == 'Footwear':
-                        # Consider pairing footwear with dresses for local uploads as well
-                        outfit_combinations[item] = [match[0] for match in matches if isinstance(match[0], dict) or getattr(match[0], 'Category', None) == 'Dress']
-                    else:
-                        outfit_combinations[item] = [match[0] for match in matches]
+                try:
+                    item_url = item.get('image_path') if isinstance(item, dict) else getattr(item, 'image_path', '')
+                    if not item_url:
+                        continue
+
+                    if matches is None:
+                        # Case 1: Standalone Dress
+                        outfit_combinations[item_url] = []
+                    elif isinstance(matches[0], tuple) and len(matches[0]) == 2:
+                        # Case 2: Two-item combinations (Top + Bottom or Dress + Footwear)
+                        second_items = [
+                        match[0].get('image_path') if isinstance(match[0], dict)
+                        else getattr(match[0], 'image_path', '')
+                        for match in matches
+                            ]
+                        outfit_combinations[item_url] = second_items
+                    elif isinstance(matches[0], tuple) and len(matches[0]) == 3:
+                        # Case 3: Three-item combinations (Top + Bottom + Footwear)
+                        combo_urls = [
+                            [
+                                match[0].get('image_path') if isinstance(match[0], dict)
+                                else getattr(match[0], 'image_path', ''),
+                                match[1].get('image_path') if isinstance(match[1], dict)
+                                else getattr(match[1], 'image_path', ''),
+                                match[2].get('image_path', '') if isinstance(match[2], dict) 
+                                else getattr(match[2], 'image_path', '')
+                            ]
+                            for match in matches
+                        ]
+                        outfit_combinations[item_url] = combo_urls
+                except Exception as e:
+                    logger.warning(f"Error building outfit for item {item}: {e}")
+        
         else:
             logger.info(f"No suitable outfits found for occasion: {occasion_to_analyze}")
             return jsonify({"classification": results, "outfit_combinations": {}}), 200
