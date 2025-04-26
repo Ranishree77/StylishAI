@@ -14,18 +14,21 @@ import matplotlib.pyplot as plt
 
 def remove_background(image_path):
     """Removes background from the input image using rembg."""
-    with open(image_path, "rb") as f:
-        input_image = f.read()
-    output_image = remove(input_image)  # Ensure remove() returns bytes
+    try:
+        with open(image_path, "rb") as f:
+            input_image = f.read()
+        output_image = remove(input_image)  # Ensure remove() returns bytes
 
-    # Convert output_image to bytes if it's not already
-    if isinstance(output_image, Image.Image):
-        with io.BytesIO() as output_buffer:
-            output_image.save(output_buffer, format="PNG")
-            output_image = output_buffer.getvalue()
-    image = Image.open(io.BytesIO(output_image))  # Convert to PIL image
-    
-    return image
+        # Convert output_image to bytes if it's not already
+        if isinstance(output_image, Image.Image):
+            with io.BytesIO() as output_buffer:
+                output_image.save(output_buffer, format="PNG")
+                output_image = output_buffer.getvalue()
+        image = Image.open(io.BytesIO(output_image))  # Convert to PIL image
+        return image
+    except Exception as e:
+        print(f"Error removing background from {image_path}: {e}")
+        return Image.open(image_path).convert("RGB") # Return original image on error
 
 def get_dominant_color_kmeans(image, resize_size=(300, 300), k=3):
     """Extracts the dominant color using K-Means clustering, ignoring shadows and transparency."""
@@ -53,7 +56,7 @@ def get_dominant_color_kmeans(image, resize_size=(300, 300), k=3):
         print(f"Error processing image: {e}")
         return None
 
-def classify_image_clip(image_path, processor, model, clothing_types, occasions, seasons, materials):
+def classify_image_clip(image_path, processor, model, clothing_types, occasions, seasons, materials, device="cpu"):
     """
     Classifies an image using the FashionCLIP model.
     """
@@ -61,40 +64,37 @@ def classify_image_clip(image_path, processor, model, clothing_types, occasions,
         image = Image.open(image_path).convert("RGB")
 
         # Classify clothing type
-        inputs = processor(text=clothing_types, images=image, return_tensors="pt", padding=True)
+        inputs = processor(text=clothing_types, images=image, return_tensors="pt", padding=True).to(device)
         outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1)
+        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1).cpu()
         clothing_type = clothing_types[probs.argmax().item()]
 
         # Classify occasion
-        inputs = processor(text=occasions, images=image, return_tensors="pt", padding=True)
+        inputs = processor(text=occasions, images=image, return_tensors="pt", padding=True).to(device)
         outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1)
+        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1).cpu()
         occasion = occasions[probs.argmax().item()]
 
         # Classify season
-        inputs = processor(text=seasons, images=image, return_tensors="pt", padding=True)
+        inputs = processor(text=seasons, images=image, return_tensors="pt", padding=True).to(device)
         outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1)
+        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1).cpu()
         season = seasons[probs.argmax().item()]
 
         # Detect material
-        inputs = processor(text=materials, images=image, return_tensors="pt", padding=True)
+        inputs = processor(text=materials, images=image, return_tensors="pt", padding=True).to(device)
         outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1)
+        probs = torch.nn.functional.softmax(outputs.logits_per_image, dim=1).cpu()
         material = materials[probs.argmax().item()]
 
         # Map clothing type to broader category
-        category = "Top" if clothing_type in tops else "Bottom" if clothing_type in bottoms else "Dress" if clothing_type in dresses else "Footwear" if clothing_type in footwear else "Other"  # Add dresses
-        
-        #extracting dominating color form image
-        # Remove background first
+        category = "Top" if clothing_type in tops else "Bottom" if clothing_type in bottoms else "Dress" if clothing_type in dresses else "Footwear" if clothing_type in footwear else "Other"
+
+        # Extract dominant color
         background_removed_image = remove_background(image_path)
-
-        # Extract dominant color from the background-removed image
         dominant_color = get_dominant_color_kmeans(background_removed_image)
-        image = Image.open(image_path).convert("RGB")
 
+        image.close() # Explicitly close the image
         return clothing_type, category, occasion, season, material, dominant_color
     except Exception as e:
         print(f"Error processing {image_path}: {e}")
