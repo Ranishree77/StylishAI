@@ -384,6 +384,7 @@ async def process_images():
             data = request.get_json()
             if isinstance(data, dict) and "images" in data and isinstance(data["images"], list) and all(isinstance(url, str) for url in data["images"]):
                 image_urls = data["images"]
+                occasion = data.get("occasion")
                 logger.info(f"Processing {len(image_urls)} images from URLs (async)")
                 result = await classify_and_analyze_url_async(
                     image_urls,
